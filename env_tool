@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#python version 3.13.2
 
 import argparse
 import subprocess
@@ -252,7 +253,7 @@ def run_conda_lock_command(
     args: list[str],
     capture: bool = True,
     check: bool = True
-) -> Union[str, None]:
+) -> str | None:
     command = ["conda-lock"] + args
     try:
         result = subprocess.run(
