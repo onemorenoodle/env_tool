@@ -1,225 +1,12 @@
 #!/usr/bin/env python3
-#python version 3.13.2
 
 import argparse
 import subprocess
 import os
-from typing import Union
-import hashlib
 
-SEPARATOR_LENGTH = 75
-ENV_TOOL_VERSION = "1.0.0"
-separator = "-" * SEPARATOR_LENGTH
 ENV_YML_FN = "environment.yaml"
-ENV_IMG_YML_FN ="environment_image.yaml"
-LOCK_YML_FN = "conda-lock.yaml"
-LOCK_IMG_YML_FN = "conda-lock_image.yaml"
-ENV_PARENT_DIR = "environments"
-
-def sync_command() -> bool:
-    try:
-        print("fetching conda environment list...")
-        env_list = get_conda_envs()
-        # Ensures the environments dir exists
-        os.makedirs(ENV_PARENT_DIR, exist_ok=True) 
-        print(separator)
-        # Iterates through each path in the environments dir
-        print(f"Syncing the following tracked environments: {os.listdir(ENV_PARENT_DIR)}")
-        for env_name in os.listdir(ENV_PARENT_DIR):
-            env_dir = os.path.join(ENV_PARENT_DIR, env_name)
-            env_img_yaml_fp = os.path.join(env_dir, ENV_IMG_YML_FN)
-            env_yaml_fp = os.path.join(env_dir, ENV_YML_FN)
-            conda_lock_fp = os.path.join(env_dir, LOCK_YML_FN)
-
-            # Ensures the path is a dir (and not a file path picked up by listdir)
-            if not os.path.isdir(env_dir):
-                continue
-            
-            print(f"Syncing {env_name}...")
-
-            # Retrieves a list of all available conda envs
-            if env_name in env_list:  # if conda environment exists
-                #print("-   conda environment exists")
-                if os.path.exists(env_img_yaml_fp):  # if environment_image.yaml exists
-                    #print("-   environment_image.yaml exists")
-                    print("Comparing conda environment to environment.yaml...")
-                    if not env_matches_yaml(env_name, env_dir, env_yaml_fp):  # if conda environment != environment.yaml
-                        #print("-   conda environment != environment.yaml")
-                        print("Comparing conda environment to environment_image.yaml...")
-                        if env_matches_yaml(env_name, env_dir, env_img_yaml_fp):  # if conda environment == environment_image.yaml
-                            #print("-   conda environment == environment_image.yaml")
-                            print("-   conda environment is behind environment.yaml")
-                            print("Updating environment.yaml...")
-                            update_env(env_name, conda_lock_fp) # env behind yaml
-                            print(f"{env_name} Successfuly synced.")
-                            continue
-                        else:
-                            #print("-   conda environment != environment_image.yaml")
-                            print("-   environment.yaml is behind conda environment")
-                            print("updating environment.yaml and conda-lock.yaml...")
-                            update_yaml(env_name, env_dir, env_yaml_fp, conda_lock_fp) # yaml behind env
-                            print(f"{env_name} Successfuly synced.")
-                            continue
-                    else:
-                        #print("-  conda environment == environment.yaml") # already in sync
-                        print(f"{env_name} Already synced.")
-                        continue
-                else:
-                    #print("-   environment_image.yaml does not exist")
-                    print("comparing conda environment to environment.yaml...")
-                    if not env_matches_yaml(env_name, env_dir, env_yaml_fp):  # if conda environment != environment.yaml
-                        #print("-   conda environment != environment.yaml")
-                        print("-   environment.yaml is behind conda environment")
-                        print("Updating environment.yaml and conda-lock.yaml...")
-                        update_yaml(env_name, env_dir, env_yaml_fp, conda_lock_fp) # yaml behind env
-                        print(f"{env_name} Successfuly synced.")
-                        continue
-                    else:
-                        #print("-   conda environment == environment.yaml") # already in sync
-                        print(f"{env_name} Already synced.")
-                        continue
-            else:
-                print("-   conda env does not exist")
-                print("Creating conda environment...")
-                update_env(env_name, conda_lock_fp) # env doesn't exist
-                #print("-   conda environment == environment.yaml")
-                print(f"{env_name} Successfuly synced.")
-                continue
-            
-
-        print(separator)
-        print("Sync complete.")
-        return True
-        
-    except FileNotFoundError as e:
-        print(f"YAML file not found: {e}")
-    except PermissionError as e:
-        print(f"Permission denied: {e}")
-    except RuntimeError as e:
-        print(f"Command error: {e}")
-    except Exception as e:
-        # Catch any other unexpected errors
-        print(f"Unexpected error: {e}")
-
-    print("Sync failed")
-    return False
-
-
-def bake_command():
-    print("\n!!!!!!------------WARNING------------!!!!!!")
-    print("After baking you must:\n" \
-    "   1. Export the docker container in its current state as a docker image\n" \
-    "   2. Upload the new docker image to Azure Container Registry\n" \
-    "   3. Update the FROM link in the Dockerfile to the newly uploaded docker image\n" \
-    "   4. Push all changes to dvc/git")
-    print("\nbake will perform sync first)")
-    
-    if input("\n Are you sure you wish to continue? (Y/N): ").strip().lower() != "y":
-        print("Aborted.")
-        return
-
-    try:
-        # assumes that env_yaml is up to date via sync command
-        if not sync_command(): 
-            print("Bake failed due to failure to sync.")
-            return
-        print(separator)
-
-        # Ensures the environments dir exists
-        if not os.path.isdir(ENV_PARENT_DIR):
-            raise FileNotFoundError(f"'{ENV_PARENT_DIR}' directory not found.")
-
-        # Iterates through each path in the environments dir
-        for env_name in os.listdir(ENV_PARENT_DIR):
-            env_dir = os.path.join(ENV_PARENT_DIR, env_name)
-
-            env_img_yaml_fp = os.path.join(env_dir, ENV_IMG_YML_FN)
-            env_yaml_fp = os.path.join(env_dir, ENV_YML_FN)
-            conda_lock_img_fp = os.path.join(env_dir, LOCK_IMG_YML_FN)
-        
-            # Ensures the path is a dir (and not a file path picked up by listdir)
-            if not os.path.isdir(env_dir):
-                continue
-            
-
-            if not os.path.exists(env_yaml_fp): # handles case where environment.yaml does not exist
-                print(f"WARNING - {env_name} is tracked but has no associated conda environment and cannot be baked.")
-                if input("Are you sure you wish to continue? (Y/N): ").strip().lower() != "y":
-                    print("Aborted.")
-                    return
-                else:
-                    continue
-
-            if os.path.exists(env_img_yaml_fp) and env_matches_yaml(env_name, env_dir, env_img_yaml_fp):
-                print(f"{env_name} is already baked.")
-                continue
-            
-            print(f"Baking {env_name}...")
-            create_env_yaml(env_name, env_dir, env_img_yaml_fp)
-            create_conda_lock(env_dir, env_yaml_fp, conda_lock_img_fp)
-            print(f"Sucessfuly baked {env_name} env")
-
-        print(separator)
-        print("\n!!!!!!------------WARNING------------!!!!!!")
-        print("DO NOT ADD/MODIFY/DELETE ANY CONDA ENVIRONMENTS, YAML FILES OR DIRECTORIES")
-        print("You must now do the following:\n" \
-        "   1. Export the docker container in its current state as a docker image\n" \
-        "   2. Upload the new docker image to Azure Container Registry\n" \
-        "   3. Update the FROM link in the Dockerfile to the newly uploaded docker image\n" \
-        "   4. Push all changes to dvc/git")
-        print(separator)
-        print("Bake complete.")
-        return
-
-    except FileNotFoundError as e:
-        print(f"YAML file not found: {e}")
-    except PermissionError as e:
-        print(f"Permission denied: {e}")
-    except RuntimeError as e:
-        print(f"Command error: {e}")
-    except Exception as e:
-        # Catch any other unexpected errors
-        print(f"Unexpected error: {e}")
-
-    print("Bake failed")
-    return
-
-
-def track_command(env_name):
-    try:
-        print("Searching for Conda environment...")
-        # Gets list of name of conda envs
-        env_list = get_conda_envs()
-    
-        # Checks if the env we're tracking exists
-        if env_name not in env_list:
-            print(f"Could not find a conda env called {env_name}")
-            print(f"Valid env names are: {env_list}")
-            return
-        
-        # Ensures the env dir exists
-        env_dir = os.path.join("environments", env_name)
-        os.makedirs(env_dir, exist_ok=True) 
-
-        print("Generating environment yaml...")
-        env_yaml_fp = os.path.join(env_dir, "environment.yaml")
-        create_env_yaml(env_name, env_dir, env_yaml_fp)
-
-        print("Generating env-lock yaml...")
-        conda_lock_fp = os.path.join(env_dir, "conda-lock.yaml")
-        create_conda_lock(env_dir, env_yaml_fp, conda_lock_fp)
-        print(f"{env_name} successfuly tracked.")
-        return
-
-    except FileNotFoundError as e:
-        print(f"YAML file not found: {e}")
-    except PermissionError as e:
-        print(f"Permission denied: {e}")
-    except RuntimeError as e:
-        print(f"Command error: {e}")
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-
+ENV_PARENT_DIR = "envs"
+TOOL_VERSION = "2.0.0"
 
 def run_conda_command(
     args: list[str],
@@ -249,108 +36,6 @@ def run_conda_command(
     except FileNotFoundError:
         raise RuntimeError("The 'conda' command was not found. Ensure Conda is installed and on your system PATH.")
 
-
-def run_conda_lock_command(
-    args: list[str],
-    capture: bool = True,
-    check: bool = True
-) -> str | None:
-    command = ["conda-lock"] + args
-    try:
-        result = subprocess.run(
-            command,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8"
-        )
-
-        return result.stdout.strip() if capture else None
-
-    except subprocess.CalledProcessError as e:
-        error_message = (
-            f"Conda-lock command failed.\n"
-            f"Command: {' '.join(command)}\n"
-            f"Exit Code: {e.returncode}\n"
-            f"Stderr:\n{e.stderr}"
-        )
-        raise RuntimeError(error_message) from e
-
-    except FileNotFoundError as e:
-        raise RuntimeError(
-            "The 'conda-lock' command was not found. "
-            "Please ensure 'conda-lock' is installed and in your system's PATH."
-        ) from e
-
-
-def update_env(env_name, conda_lock_fp):
-    if not os.path.exists(conda_lock_fp):
-        raise FileNotFoundError(f"Conda-lock file not found: {conda_lock_fp}")
-
-    run_conda_lock_command([
-        "install",
-        "-n", env_name,
-        conda_lock_fp
-    ], capture=False)
-
-
-def update_yaml(env_name, env_dir, env_yaml_fp, conda_lock_fp):
-    create_env_yaml(env_name, env_dir, env_yaml_fp)
-    create_conda_lock(env_dir, env_yaml_fp, conda_lock_fp)
-
-
-def create_env_yaml(env_name, env_dir, target_fp):
-    if not os.path.isdir(env_dir):
-        raise FileNotFoundError(f"Target directory does not exist: {env_name}")
-
-    env_yaml = run_conda_command(["env", "export", "--name", env_name])
-
-    with open(target_fp, "w", encoding="utf-8") as f:
-        f.write(env_yaml)
-
-
-def create_conda_lock(env_dir, env_yaml_fp, target_fp):
-    if not os.path.isdir(env_dir):
-        raise FileNotFoundError(f"Target directory does not exist: {env_dir}")
-
-    if not os.path.isfile(env_yaml_fp):
-        raise FileNotFoundError(f"Environment YAML file does not exist: {env_yaml_fp}")
-
-    run_conda_lock_command([
-        "-f", env_yaml_fp,
-        "--platform", "linux-64",
-        "--lockfile", target_fp
-    ], capture=False)
-
-
-def env_matches_yaml(env_name: str, env_dir: str, env_yaml_fp: str) -> bool:
-    if not os.path.isdir(env_dir):
-        raise FileNotFoundError(f"environment dir does not exist: {env_dir}")
-    if not os.path.isfile(env_yaml_fp):
-        raise FileNotFoundError(f"environment.yaml not found: {env_yaml_fp}")
-
-    temp_yaml_fp = os.path.join(env_dir, "temp_env.yaml")
-
-    try:
-        env_yaml = run_conda_command(["env", "export", "--name", env_name])
-
-        with open(temp_yaml_fp, "w", encoding="utf-8") as f:
-            f.write(env_yaml)
-
-        with open(temp_yaml_fp, "rb") as f:
-            temp_hash = hashlib.sha256(f.read()).hexdigest()
-
-        with open(env_yaml_fp, "rb") as f:
-            ref_hash = hashlib.sha256(f.read()).hexdigest()
-
-        return temp_hash == ref_hash
-
-    finally:
-        if os.path.exists(temp_yaml_fp):
-            os.remove(temp_yaml_fp)
-
-
 def get_conda_envs() -> list[str]:
     output = run_conda_command(["env", "list"])
 
@@ -365,29 +50,177 @@ def get_conda_envs() -> list[str]:
 
     return env_names
 
+def sync_command(env_name):
+    env_dir = os.path.join(ENV_PARENT_DIR, env_name)
+    env_yaml_fp = os.path.join(env_dir, ENV_YML_FN)
+
+    if not os.path.isfile(env_yaml_fp):
+        raise FileNotFoundError(f"Environment YAML file does not exist: {env_yaml_fp}")
+
+    print(f"Syncing conda environment '{env_name}' from {env_yaml_fp}...")
+    try:
+        env_list = get_conda_envs()
+        if env_name in env_list:
+            print(f"Removing existing environment '{env_name}'...")
+            run_conda_command(["remove", "-n", env_name, "--all", "--yes"])
+            print(f"Environment '{env_name}' removed before recreation.")
+        else:
+            print(f"Environment '{env_name}' does not exist, creating new.")
+
+        run_conda_command(["create", "-n", env_name, "-f", env_yaml_fp])
+        print(f"Environment '{env_name}' created from {env_yaml_fp}.")
+    except (FileNotFoundError, PermissionError, RuntimeError) as e:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"Unexpected error syncing '{env_name}': {e}")
+
+def sync_all_command():
+    try:
+        for env_name in os.listdir(ENV_PARENT_DIR):
+            env_dir = os.path.join(ENV_PARENT_DIR, env_name)
+            env_yaml_fp = os.path.join(env_dir, ENV_YML_FN)
+            if os.path.isdir(env_dir) and os.path.isfile(env_yaml_fp):
+                try:
+                    sync_command(env_name)
+                except (FileNotFoundError, PermissionError, RuntimeError) as e:
+                    print(f"Error syncing '{env_name}': {e}")
+                except Exception as e:
+                    print(f"Unexpected error syncing '{env_name}': {e}")
+    except Exception as e:
+        print(f"Unexpected error in sync_all_command: {e}")
+
+def freeze_command(env_name):
+    env_dir = os.path.join(ENV_PARENT_DIR, env_name)
+    explicit_fp = os.path.join(env_dir, "explicit.txt")
+
+    env_list = get_conda_envs()
+    if env_name not in env_list:
+        print(f"Environment '{env_name}' does not exist, cannot generate explicit.txt.")
+        return
+
+    try:
+        explicit_content = run_conda_command(["list", "--explicit", "--name", env_name])
+        with open(explicit_fp, "w", encoding="utf-8") as f:
+            f.write(explicit_content)
+        print(f"explicit.txt generated for '{env_name}'.")
+    except Exception as e:
+        print(f"Error generating explicit.txt for '{env_name}': {e}")
+
+def freeze_all_command():
+    env_list = get_conda_envs()
+    for env_name in os.listdir(ENV_PARENT_DIR):
+        env_dir = os.path.join(ENV_PARENT_DIR, env_name)
+        env_yaml_fp = os.path.join(env_dir, ENV_YML_FN)
+        explicit_fp = os.path.join(env_dir, "explicit.txt")
+
+        if os.path.isdir(env_dir) and os.path.isfile(env_yaml_fp):
+            if env_name not in env_list:
+                print(f"Environment '{env_name}' does not exist, cannot generate explicit.txt.")
+                continue
+            try:
+                explicit_content = run_conda_command(["list", "--explicit", "--name", env_name])
+                with open(explicit_fp, "w", encoding="utf-8") as f:
+                    f.write(explicit_content)
+                print(f"explicit.txt generated for '{env_name}'.")
+            except Exception as e:
+                print(f"Error generating explicit.txt for '{env_name}': {e}")
+
+def sync_static_command(env_name):
+    env_dir = os.path.join(ENV_PARENT_DIR, env_name)
+    reqs_fp = os.path.join(env_dir, "explicit.txt")
+
+    if not os.path.isfile(reqs_fp):
+        print(f"explicit.txt not found for environment '{env_name}' at {reqs_fp}")
+        return
+
+    print(f"Creating conda environment '{env_name}' from {reqs_fp}...")
+    try:
+        print("getting existing envs")
+        env_list = get_conda_envs()
+        print(f"existing envs: {env_list}")
+        print(f"env_name: {env_name}")
+        print("checking if env in list")
+        if env_name in env_list:
+            print("removing existing env")
+            run_conda_command(["remove", "-n", env_name, "--all", "--yes"])
+            print(f"Environment '{env_name}' removed before recreation.")
+        else:
+            print(f"Environment '{env_name}' does not exist, creating new.")
+
+        run_conda_command(["create", "-n", env_name, "--file", reqs_fp])
+        print(f"Environment '{env_name}' created from explicit.txt.")
+    except Exception as e:
+        print(f"Error recreating '{env_name}' from explicit.txt: {e}")
+
+def sync_static_all_command():
+    try:
+        for env_name in os.listdir(ENV_PARENT_DIR):
+            env_dir = os.path.join(ENV_PARENT_DIR, env_name)
+            reqs_fp = os.path.join(env_dir, "explicit.txt")
+            if os.path.isdir(env_dir) and os.path.isfile(reqs_fp):
+                sync_static_command(env_name)
+    except Exception as e:
+        print(f"Unexpected error in sync_static_all_command: {e}")
+
+def prune_command():
+    env_list = get_conda_envs()
+    valid_envs = set()
+    for env_name in os.listdir(ENV_PARENT_DIR):
+        env_dir = os.path.join(ENV_PARENT_DIR, env_name)
+        env_yaml_fp = os.path.join(env_dir, ENV_YML_FN)
+        if os.path.isdir(env_dir) and os.path.isfile(env_yaml_fp):
+            valid_envs.add(env_name)
+    for env_name in env_list:
+        if env_name not in valid_envs and env_name != "base":
+            print(f"Pruning environment '{env_name}' (no environment.yaml found)...")
+            try:
+                run_conda_command(["remove", "-n", env_name, "--all", "--yes"])
+                print(f"Environment '{env_name}' removed.")
+            except Exception as e:
+                print(f"Error removing '{env_name}': {e}")
 
 def main():
     parser = argparse.ArgumentParser(description="Environment Manager CLI")
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("sync", help="Synronises all tracked conda environments")
-    subparsers.add_parser("bake", help="Converts all tracked conda environments into a baked state")
-    subparsers.add_parser("version", help="The version of the current env_tool")
-    
-    track_parser = subparsers.add_parser("track", help="Tracks a specific conda environment")
-    track_parser.add_argument("env_name", help="Name of the conda environment to track")
+    sync_parser = subparsers.add_parser("sync", help="Syncs the specified env from the relevant yaml file")
+    sync_parser.add_argument("env_name", help="Name of the conda environment to sync")
+
+    subparsers.add_parser("sync_all", help="Searches for all environment.yaml files in the environments directory and syncs the relevant conda envs")
+
+    freeze_parser = subparsers.add_parser("freeze", help="Syncs the specified env and generates explicit.txt")
+    freeze_parser.add_argument("env_name", help="Name of the conda environment to sync and export explicit.txt")
+
+    subparsers.add_parser("freeze_all", help="Syncs all envs and generates explicit.txt for each")
+
+    sync_static_parser = subparsers.add_parser("sync_static", help="Recreates the specified env from explicit.txt")
+    sync_static_parser.add_argument("env_name", help="Name of the conda environment to recreate from explicit.txt")
+
+    subparsers.add_parser("sync_static_all", help="Recreates all envs from explicit.txt files in their directories")
+
+    subparsers.add_parser("prune", help="Removes all conda envs that don't have associated environment.yaml files")
+
+    subparsers.add_parser("version", help="Prints the tool version")
 
     args = parser.parse_args()
 
     match args.command:
         case "sync":
-            sync_command()
-        case "track":
-            track_command(args.env_name)
-        case "bake":
-            bake_command()
+            sync_command(args.env_name)
+        case "sync_all":
+            sync_all_command()
+        case "freeze":
+            freeze_command(args.env_name)
+        case "freeze_all":
+            freeze_all_command()
+        case "sync_static":
+            sync_static_command(args.env_name)
+        case "sync_static_all":
+            sync_static_all_command()
+        case "prune":
+            prune_command()
         case "version":
-            print(ENV_TOOL_VERSION)
+            print(TOOL_VERSION)
         case _:
             parser.print_help()
 
