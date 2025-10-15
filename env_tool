@@ -67,7 +67,7 @@ def sync_command(env_name):
         else:
             print(f"Environment '{env_name}' does not exist, creating new.")
 
-        run_conda_command(["create", "-n", env_name, "-f", env_yaml_fp])
+        run_conda_command(["env", "create", "-n", env_name, "-f", env_yaml_fp])
         print(f"Environment '{env_name}' created from {env_yaml_fp}.")
     except (FileNotFoundError, PermissionError, RuntimeError) as e:
         raise
