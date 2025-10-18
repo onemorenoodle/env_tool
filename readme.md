@@ -27,7 +27,7 @@ curl -L -o env_tool https://raw.githubusercontent.com/onemorenoodle/env_tool/ref
 
 ## Usage
 
-All environments are expected to be organized under the `envs/` directory, each with its own subdirectory containing an `environment.yaml` and/or `explicit.txt`.
+All environments are expected to be organized under the `conda/` directory, each with its own subdirectory containing an `environment.yaml` and/or `explicit.txt`.
 
 ### Commands
 
@@ -40,7 +40,7 @@ env_tool sync myenv
 ```
 
 #### 2. `sync_all`
-Synchronize all environments found in `envs/` that have an `environment.yaml`.
+Synchronize all environments found in `conda/` that have an `environment.yaml`.
 
 **Example:**
 ```
@@ -56,7 +56,7 @@ env_tool freeze myenv
 ```
 
 #### 4. `freeze_all`
-Export `explicit.txt` for all environments in `envs/` that have an `environment.yaml`.
+Export `explicit.txt` for all environments in `conda/` that have an `environment.yaml`.
 
 **Example:**
 ```
@@ -72,7 +72,7 @@ env_tool sync_static myenv
 ```
 
 #### 6. `sync_static_all`
-Recreate all environments in `envs/` that have an `explicit.txt`.
+Recreate all environments in `conda/` that have an `explicit.txt`.
 
 **Example:**
 ```
@@ -88,7 +88,7 @@ env_tool version
 ```
 
 #### 8. `prune`
-Remove every Conda environment (except `base`) that lacks an `environment.yaml` in `envs/`.
+Remove every Conda environment (except `base`) that lacks an `environment.yaml` in `conda/`.
 
 **Example:**
 ```
@@ -98,7 +98,7 @@ env_tool prune
 ## Best Practices & Intended Workflow
 
 1. **Environment Source Control:**  
-   Store each environment in its own subdirectory under `envs/`, with both `environment.yaml` and (optionally) `explicit.txt`.
+   Store each environment in its own subdirectory under `conda/`, with both `environment.yaml` and (optionally) `explicit.txt`.
 
 2. **Syncing Environments:**  
    Use `sync` or `sync_all` to create environments from `environment.yaml`.  
@@ -120,7 +120,7 @@ env_tool prune
    Team members should use `sync_static` for guaranteed reproducibility, or `sync` for flexibility.
 
 7. **Pruning Environments:**  
-   Run `prune` periodically to delete Conda environments that are not tracked by an `environment.yaml` in `envs/`. The `base` environment is never removed.
+   Run `prune` periodically to delete Conda environments that are not tracked by an `environment.yaml` in `conda/`. The `base` environment is never removed.
 
 **Recommended Workflow:**  
 - Create your `environment.yaml` specifying the main packages and pin versions or ranges as needed.
@@ -131,7 +131,7 @@ env_tool prune
 ## Example Directory Structure
 
 ```
-envs/
+conda/
   myenv/
     environment.yaml
     explicit.txt

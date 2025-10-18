@@ -5,8 +5,8 @@ import subprocess
 import os
 
 ENV_YML_FN = "environment.yaml"
-ENV_PARENT_DIR = "envs"
-TOOL_VERSION = "2.0.0"
+ENV_PARENT_DIR = "conda"
+TOOL_VERSION = "3.0.0"
 
 def run_conda_command(
     args: list[str],
